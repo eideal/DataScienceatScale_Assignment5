@@ -1,0 +1,272 @@
+---
+title: "Classification of Ocean Microbes"
+author: "Emma Ideal"
+date: "28 December 2015"
+output: html_document
+---
+
+### Step 1: Read and summarize the data
+
+We first read the CSV and store the data in memory in a variable called "data".
+
+```{r}
+data <- read.csv('seaflow_21min.csv')
+```
+
+The data frame contains 72343 rows and 12 columns. Here is a summary of the data:
+
+```{r}
+summary(data)
+```
+
+where each column is as follows:
+
+· **file_id**: The data arrives in files, where each file represents a three-minute window; this field represents which file the data came from. The number is ordered by time, but is otherwise not significant.
+
+· **time**: This is an integer representing the time the particle passed through the instrument. Many particles may arrive at the same time; time is not a key for this relation.
+
+· **cell_id**: A unique identifier for each cell WITHIN a file. (file_id, cell_id) is a key for this relation.
+
+· **d1, d2**: Intensity of light at the two main sensors, oriented perpendicularly. These sensors are primarily used to determine whether the particles are properly centered in the stream. Used primarily in preprocesssing; they are unlikely to be useful for classification.
+
+· **fsc_small, fsc_perp, fsc_big**: Forward scatter small, perpendicular, and big. These values help distingish different sizes of particles.
+
+· **pe**: A measurement of phycoerythrin fluorescence, which is related to the wavelength associated with an orange color in microorganisms
+
+· **chl_small, chl_big**: Measurements related to the wavelength of light corresponding to chlorophyll.
+
+· **pop**: This is the class label assigned by the clustering mechanism used in the production system. It can be considered "ground truth" for the purposes of the assignment, but note that there are particles that cannot be unambiguously classified, so you should not aim for 100% accuracy. The values in this column are crypto, nano, pico, synecho, and ultra
+
+#### Questions 2 and 3
+
+Question 2 reads: How many particles labeled "synecho" are in the file "seaflow_21min.csv"?
+
+```{r}
+sum(data$pop == 'synecho')
+```
+
+Question 3 is: What is the 3rd quantile of the field fsc_small? We see the answer above from the summary(data) call:
+```{r,echo=FALSE}
+print(39184)
+```
+
+
+### Split the data into training and testing sets
+
+We can use the createDataPartition function from the caret package to divide our data into training and test sets:
+
+```{r, message=FALSE}
+library(caret)
+inTrain <- createDataPartition(y=data$pop, p=0.5, list=FALSE)
+training <- data[inTrain,]
+testing <- data[-inTrain,]
+```
+
+#### Question 4
+
+Question 4 from the assignment reads: What is the mean of the variable "time" for your training set?
+```{r}
+mean(training$time)
+```
+
+#### Question 5
+
+We can plot pe against chl_small and color by pop using ggplot:
+
+```{r, message=FALSE}
+library(ggplot2)
+ggplot(training, aes(x = chl_small, y = pe, col=pop)) + geom_point()
+```
+
+Question 5 asks us: in the plot of pe vs. chl_small, the particles labeled ultra should appear to be somewhat "mixed" with two other populations of particles. Which two populations?
+We can see they appear to be mixed with:
+```{r, echo=FALSE}
+print('nano')
+print('pico')
+```
+
+### Train a decision tree
+
+Let's train a decision tree to classify particle type as a function of the sensor measurements: 
+
+```{r}
+library(rpart)
+form <- formula(pop ~ fsc_small + fsc_perp + fsc_big + pe + chl_big + chl_small)
+model <- rpart(form, method='class', data=training)
+print(model)
+```
+
+#### Questions 6, 7, and 8
+
+Question 6 reads: Inspect the trained tree. Which populations, if any, is your tree incapable of recognizing?
+We can see from the tree that a **crypto** branch does not appear.
+
+Question 7 is: Most trees will include a node near the root that applies a rule to the pe field, where particles with a value less than some threshold will descend down one branch, and particles with a value greater than some threshold will descend down a different branch. If you look at the plot you created previously, you can verify that the threshold used in the tree is evident visually. What is the value of the threshold on the pe field learned in your model?
+
+If we look at the plot, we can see a recognizable boundary between groups around pe = 5000. Indeed, the tree we've trained uses a cut on the pe variable at **5004** as a first split.
+
+Question 8 is: Based on your decision tree, which variables appear to be the most important in predicting the class population?
+
+From the printed model, we can only see the following variables split on:
+```{r}
+print('pe')
+print('chl_small')
+```
+
+These must be the most powerful discriminators in classifying particle type.
+
+### Evaluate the decision tree on the test data
+
+We can use the **predict** function to generate predictions on our test data:
+
+```{r}
+pred <- predict(model, newdata=testing, type='class')
+actual <- testing$pop
+```
+
+#### Question 9
+
+Question 9 is: How accurate was your decision tree on the test data? 
+
+We can get the accuracy with the following:
+
+```{r}
+sum(pred == actual)/nrow(testing)
+```
+
+### Build and evaluate a random forest
+
+Let's train a random forest model and compare its accuracy to our single decision tree:
+
+```{r}
+library(randomForest)
+rfmodel <- randomForest(form, training)
+pred_rf <- predict(rfmodel, newdata=testing)
+```
+
+#### Question 10
+
+This question asks: What was the accuracy of your random forest model on the test data?
+
+We can find this in the same way as we did for the decision tree:
+
+```{r}
+sum(pred_rf==actual)/nrow(testing)
+```
+
+The random forest outperforms the single decision tree on the test set. A random forest can estimate the variable importance during training by permuting the values of a given variable and measuring its effect on the classification. If permuting the values does not affect the model's ability to predict correctly, then the variable must not be very important. Moreover, a random forest can obtain another estimate of variable importance based on the Gini impurity. The function **importance(model)** prints the mean decrease in gini importance for each variable. The higher the number, the more the gini impurity score decreases by branching on this variable, indicating the variable is more important in the model.
+
+```{r}
+importance(rfmodel)
+```
+
+We can see that pe and chl_small have the largest mean decrease in Gini impurity and are therefore the most important covariates.
+
+### Train a support vector machine model and compare results
+
+Let's train an SVM model and compare its accuracy on the test set to our other two models:
+
+```{r}
+library(e1071)
+svmmodel <- svm(form, training)
+pred_svm <- predict(svmmodel, newdata=testing)
+```
+
+#### Question 12
+
+Question 12 from the assignment asks: What was the accuracy of your support vector machine model on the test data?
+
+We can get this in the same way as before:
+
+```{r}
+sum(pred_svm == actual)/nrow(testing)
+```
+
+### Construct confusion matrices
+
+We can use the **table** function to generate confusion matrices for each of our three methods (rpart, randomForest, svm):
+
+```{r}
+table(pred, actual)
+table(pred_rf, actual)
+table(pred_svm, actual)
+```
+
+#### Question 13
+
+Question 13 asks: What appears to be the most common error the models make?
+
+The confusion matrices each have the largest off-diagonal value when actual = 'ultra' and pred = 'pico', indicating those instances where ultra particles are misclassified as pico particles.
+
+#### Question 14
+
+The measurements in this dataset (fsc_small, fsc_perp, fsc_big, pe, chl_small, chl_big) are all supposed to be continuous, but one is not. We can figure out which one is not by asking for the length of the unique values for these columns:
+
+```{r}
+getunique <- function(x){
+        length(unique(x))
+}
+cols <- c('fsc_small', 'fsc_perp', 'fsc_big', 'pe', 'chl_small', 'chl_big')
+lapply(training[,cols], FUN=getunique)
+```
+
+It seems clear that fsc_big is not a continuous variable.
+
+#### A subtler issue with the data
+
+There is a more subtle issue with the data as well. If we plot time vs. chl_big, we notice a band of the data looks out of place. This band corresponds to data from a particular file for which the sensor may have been miscalibrated. We will remove this data from the dataset by filtering out all data associated with file_id 208 and then repeat the experiment for all three methods, making sure to split the dataset into training and test sets *after* filtering out the bad data. 
+
+```{r}
+require(gridExtra)
+g1 <- ggplot(training, aes(x=time, y=chl_big, col=file_id)) + geom_point()
+g2 <- ggplot(training, aes(x=time, y=chl_big, col=pop)) + geom_point()
+grid.arrange(g1,g2,ncol=2)
+```
+
+We can see that the pop variable seems to be miscalibrated for file_id = 208.
+
+Let's remove all rows from our dataframe **data** that are from file_id = 208:
+
+```{r}
+library(dplyr)
+data_m208 <- filter(data, file_id != 208)
+
+# Divide the dataset into training and testing
+inTrain <- createDataPartition(y=data_m208$pop, p=0.5, list=FALSE)
+training_new <- data_m208[inTrain,]
+testing_new <- data_m208[-inTrain,]
+```
+
+Now that we have our new training and testing sets, we can retain our three models:
+
+```{r}
+rpartMod <- rpart(form, method='class', data=training_new)
+rfMod    <- randomForest(form, data=training_new)
+svmMod   <- svm(form, data=training_new)
+
+# Make predictions on the test set
+predrpart <- predict(rpartMod, testing_new, type='class')
+predrf    <- predict(rfMod, testing_new)
+predsvm   <- predict(svmMod, testing_new)
+
+actual_new <- testing_new$pop
+```
+
+Now we can compute the net increase or decrease in accuracy (due to removing file_id 208) for each model:
+
+```{r}
+# Net effect on accuracy measure when removing file_id=208 data
+
+# decision tree
+(sum(predrpart == actual_new)/nrow(testing_new)) - sum(pred == actual)/nrow(testing)
+# random forest
+(sum(predrf == actual_new)/nrow(testing_new)) - sum(pred_rf == actual)/nrow(testing)
+# support vector machine
+(sum(predsvm == actual_new)/nrow(testing_new)) - sum(pred_svm == actual)/nrow(testing)
+```
+
+#### Question 15
+
+Question 15 reads: After removing data associated with file_id 208, what was the effect on the accuracy of your svm model? (A positive number represents an improvement in net accuracy, while a negative number indicates a decrease in net accuracy).
+
+From our printed results above, we can see a net improvement in the SVM model's accuracy of **0.05** after removing the miscalibrated data.

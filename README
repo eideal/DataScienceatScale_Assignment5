@@ -1,0 +1,12 @@
+README for DataScienceatScale_Assignment5
+
+---------
+
+Data: seaflow_21min.csv
+
+This dataset represents a 21 minute sample from a research vessel on the open ocean. A flow cytometer is situated on the vessel, and it delivers a flow of particles through capillary. By shining lasers of different wavelengths and measuring the absorption and refraction patterns, you can determine how large the particles are that pass through it as well as some information about its color and other properties. A central task of the analysis is the classification of the particles based on their optical measurements.
+
+---------
+
+Output: DataScienceatScale_Assignment5.Rmd
+
